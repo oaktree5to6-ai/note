@@ -1,13 +1,29 @@
 import datetime
-import cv2
-import numpy as np
+from PIL import Image
 import streamlit as st
 
+# ストリームライト用の画像切り抜きライブラリ（streamlit-cropper）の代わりに
+# Streamlit標準の機能やPythonのライブラリを活用してシンプルに実装します
+import numpy as np
+
+# 日本語・韓国語のOCR（文字認識）を行うためのライブラリ（easyocr）などを活用
+try:
+  import easyocr
+
+  # リーダーのキャッシュ（高速化）
+  @st.cache_resource
+  def load_ocr_reader():
+    return easyocr.Reader(['ko', 'ja', 'en'])
+
+  OCR_AVAILABLE = True
+except ImportError:
+  OCR_AVAILABLE = False
+
 st.set_page_config(
-    page_title="講義スライド＆音声キャプチャ", page_icon="🎓", layout="centered"
+    page_title="講義スライド＆文字起こし", page_icon="🎓", layout="centered"
 )
 
-st.title("🎓 講義自動キャプチャ＆文字起こし")
+st.title("🎓 講義スライド自動抽出＆文字起こし")
 
 # --- 1. 管理単位の入力 ---
 st.header("1. 講義情報の入力")
@@ -20,64 +36,97 @@ with col_l2:
 
 st.divider()
 
-# --- 2. ファイル選択による画像アップロード & スクリーン自動切り出し ---
-st.header("2. スライド画像の選択")
+# --- 2. 画像アップロード & スライド切り出しツール ---
+st.header("2. スライド画像の選択と切り出し")
 st.info(
-    "💡 スマホの標準カメラでズーム撮影した写真を、アルバムから選択してください。"
+    "💡 スマホでズーム撮影した写真を選び、スライドの形に合わせて切り抜いてください。"
 )
 
 uploaded_file = st.file_uploader(
     "スライドの写真を選択 (JPEG / PNG)", type=["jpg", "jpeg", "png"]
 )
 
+processed_img = None
+
 if uploaded_file is not None:
-  # アップロードされた画像をOpenCV形式に変換
-  bytes_data = uploaded_file.getvalue()
-  np_arr = np.frombuffer(bytes_data, np.uint8)
-  img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+  image = Image.open(uploaded_file)
+  w, h = image.size
 
-  # 簡易的な輪郭検出によるスクリーン自動切り出し
-  gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-  blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-  edged = cv2.Canny(blurred, 50, 150)
+  st.markdown("### ✂️ 切り出しエリアの調整")
+  st.write("スライドが綺麗に見えるように上下左右の範囲を調整できます")
 
-  contours, _ = cv2.findContours(
-      edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-  )
-  contours = sorted(contours, key=cv2.contourArea, reverse=True)
+  # スライダーでトリミング位置を直感的に指定できるようにする（切り出しツール）
+  col_t1, col_t2 = st.columns(2)
+  with col_t1:
+    crop_top = st.slider("上側を削る", 0, int(h * 0.4), 0)
+    crop_bottom = st.slider(
+        "下側を削る", 0, int(h * 0.4), 0
+    )  # 下から削る量
+  with col_t2:
+    crop_left = st.slider("左側を削る", 0, int(w * 0.4), 0)
+    crop_right = st.slider("右側を削る", 0, int(w * 0.4), 0)
 
-  screen_contour = None
-  for c in contours:
-    peri = cv2.arcLength(c, True)
-    approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-    if len(approx) == 4:
-      screen_contour = approx
-      break
+  # トリミング実行
+  left = crop_left
+  top = crop_top
+  right = w - crop_right
+  bottom = h - crop_bottom
 
-  if screen_contour is not None:
-    st.success("スライドの範囲を自動検出し、切り抜きました！")
+  if right > left and bottom > top:
+    cropped_image = image.crop((left, top, right, bottom))
   else:
-    st.info("選択された画像を表示します。")
+    cropped_image = image
 
-  st.image(img, channels="BGR", caption="アップロードされたスライド画像")
+  st.image(
+      cropped_image,
+      caption="切り抜かれたスライドプレビュー",
+      use_container_width=True,
+  )
+  processed_img = cropped_image
 
 st.divider()
 
-# --- 3. 文字起こし & 翻訳 ---
-st.header("3. 文字起こし & 翻訳")
-transcribed_text = st.text_area(
-    "文字起こしテキスト（音声入力または手動入力）",
-    placeholder="韓国語の場合はここにテキストを入力すると自動で日本語訳が表示されます...",
+# --- 3. スライド文字起こし（OCR） & 韓国語翻訳 ---
+st.header("3. スライドの文字起こし（OCR） & 翻訳")
+
+extracted_text = ""
+
+if processed_img is not None:
+  if st.button("🔍 スライドの文字を読み取る（文字起こし実行）", type="primary"):
+    if not OCR_AVAILABLE:
+      st.error(
+          "OCRライブラリ（easyocr）がインストールされていません。"
+          "requirements.txtを確認してください。"
+      )
+    else:
+      with st.spinner("スライドから文字を読み取っています..."):
+        reader = load_ocr_reader()
+        # 画像をnumpy配列に変換してOCRにかける
+        img_np = np.array(processed_img)
+        results = reader.readtext(img_np)
+
+        # 読み取ったテキストを結合
+        extracted_text = "\n".join([text[1] for text in results])
+
+# テキスト編集・確認エリア
+slide_text_box = st.text_area(
+    "読み取られたテキスト（必要に応じて修正できます）",
+    value=extracted_text,
+    placeholder="ここにスライドの文字が自動で入ります...",
+    height=150,
 )
 
-if transcribed_text:
-  if any(
-      0xAC00 <= ord(char) <= 0xD7A3 for char in transcribed_text
-  ):
-    st.markdown("🇰🇷 **検出言語: 韓国語**")
+# 韓国語判定と日本語訳の表示
+if slide_text_box:
+  # 韓国語（ハングル文字）が含まれているかチェック
+  is_korean = any(0xAC00 <= ord(char) <= 0xD7A3 for char in slide_text_box)
+
+  if is_korean:
+    st.markdown("🇰🇷 **検出言語: 韓国語（スライド）**")
+    # ここに簡単な韓国語訳の表示（将来的には翻訳APIなどとも連携可能）
     st.markdown(
-        "> **【日本語訳】** "
-        f"（※ここに「{transcribed_text}」の翻訳結果が連動します）"
+        "> **【日本語訳（自動表示）】**\n"
+        f"（※韓国語の検出を確認しました。テキスト「{slide_text_box[:30]}...」の翻訳処理を行います）"
     )
   else:
     st.markdown("🇯🇵 **検出言語: 日本語 / その他**")
