@@ -1,19 +1,18 @@
 import datetime
 from PIL import Image
+import numpy as np
 import streamlit as st
 
-# ストリームライト用の画像切り抜きライブラリ（streamlit-cropper）の代わりに
-# Streamlit標準の機能やPythonのライブラリを活用してシンプルに実装します
-import numpy as np
-
-# 日本語・韓国語のOCR（文字認識）を行うためのライブラリ（easyocr）などを活用
 try:
   import easyocr
 
-  # リーダーのキャッシュ（高速化）
+  # 言語ごとにキャッシュして読み込む
   @st.cache_resource
-  def load_ocr_reader():
-    return easyocr.Reader(['ko', 'ja', 'en'])
+  def load_ocr_reader(lang_code):
+    if lang_code == "ko":
+      return easyocr.Reader(["ko", "en"])
+    else:
+      return easyocr.Reader(["ja", "en"])
 
   OCR_AVAILABLE = True
 except ImportError:
@@ -53,20 +52,15 @@ if uploaded_file is not None:
   w, h = image.size
 
   st.markdown("### ✂️ 切り出しエリアの調整")
-  st.write("スライドが綺麗に見えるように上下左右の範囲を調整できます")
 
-  # スライダーでトリミング位置を直感的に指定できるようにする（切り出しツール）
   col_t1, col_t2 = st.columns(2)
   with col_t1:
     crop_top = st.slider("上側を削る", 0, int(h * 0.4), 0)
-    crop_bottom = st.slider(
-        "下側を削る", 0, int(h * 0.4), 0
-    )  # 下から削る量
+    crop_bottom = st.slider("下側を削る", 0, int(h * 0.4), 0)
   with col_t2:
     crop_left = st.slider("左側を削る", 0, int(w * 0.4), 0)
     crop_right = st.slider("右側を削る", 0, int(w * 0.4), 0)
 
-  # トリミング実行
   left = crop_left
   top = crop_top
   right = w - crop_right
@@ -86,47 +80,45 @@ if uploaded_file is not None:
 
 st.divider()
 
-# --- 3. スライド文字起こし（OCR） & 韓国語翻訳 ---
+# --- 3. スライド文字起こし（OCR） & 翻訳 ---
 st.header("3. スライドの文字起こし（OCR） & 翻訳")
+
+# 読み取り言語の選択（エラー防止のため分割）
+ocr_lang = st.radio(
+    "スライドの言語を選択してください",
+    ["韓国語 (Korean)", "日本語 (Japanese)"],
+    horizontal=True,
+)
 
 extracted_text = ""
 
 if processed_img is not None:
   if st.button("🔍 スライドの文字を読み取る（文字起こし実行）", type="primary"):
     if not OCR_AVAILABLE:
-      st.error(
-          "OCRライブラリ（easyocr）がインストールされていません。"
-          "requirements.txtを確認してください。"
-      )
+      st.error("OCRライブラリが準備できていません。")
     else:
-      with st.spinner("スライドから文字を読み取っています..."):
-        reader = load_ocr_reader()
-        # 画像をnumpy配列に変換してOCRにかける
+      lang_code = "ko" if "韓国語" in ocr_lang else "ja"
+      with st.spinner(
+          f"{ocr_lang}スライドから文字を読み取っています（初回は数十秒かかります）..."
+      ):
+        reader = load_ocr_reader(lang_code)
         img_np = np.array(processed_img)
         results = reader.readtext(img_np)
-
-        # 読み取ったテキストを結合
         extracted_text = "\n".join([text[1] for text in results])
 
-# テキスト編集・確認エリア
 slide_text_box = st.text_area(
-    "読み取られたテキスト（必要に応じて修正できます）",
+    "読み取られたテキスト（修正可能）",
     value=extracted_text,
     placeholder="ここにスライドの文字が自動で入ります...",
     height=150,
 )
 
-# 韓国語判定と日本語訳の表示
 if slide_text_box:
-  # 韓国語（ハングル文字）が含まれているかチェック
   is_korean = any(0xAC00 <= ord(char) <= 0xD7A3 for char in slide_text_box)
-
   if is_korean:
-    st.markdown("🇰🇷 **検出言語: 韓国語（スライド）**")
-    # ここに簡単な韓国語訳の表示（将来的には翻訳APIなどとも連携可能）
+    st.markdown("🇰🇷 **検出言語: 韓国語**")
     st.markdown(
-        "> **【日本語訳（自動表示）】**\n"
-        f"（※韓国語の検出を確認しました。テキスト「{slide_text_box[:30]}...」の翻訳処理を行います）"
+        f"> **【日本語訳】**\n> （※韓国語のテキスト「{slide_text_box[:30]}...」を検出しました）"
     )
   else:
     st.markdown("🇯🇵 **検出言語: 日本語 / その他**")
@@ -139,7 +131,6 @@ slide_memo = st.text_area(
     "このスライドに関するメモ", placeholder="先生が強調していたポイントなど"
 )
 
-# --- 保存ボタン ---
 if st.button("💾 このスライドの情報を保存する", type="primary"):
   st.success(
       f"【{lecture_name} / {lecture_date} / {lecture_location}】のデータを保存しました！"
