@@ -20,8 +20,17 @@ with col_l2:
 
 st.divider()
 
-# --- 2. スクリーン撮影 & ズーム機能付き切り出し ---
-st.header("2. スクリーン撮影 & ズーム・切り出し")
+# --- 2. 撮影前ズーム選択 & スクリーン撮影 ---
+st.header("2. スクリーン撮影")
+
+# 📸 撮影「前」に倍率を選択できるようにしました！
+st.markdown("### 🔍 撮影時のズーム倍率を選択")
+zoom_mode = st.radio(
+    "後ろの席からの撮影に合わせて倍率を選んでください",
+    ["等倍 (1x)", "2倍 (2x)", "4倍 (4x)"],
+    horizontal=True,
+)
+
 uploaded_file = st.camera_input("スクリーンの写真を撮影")
 
 if uploaded_file is not None:
@@ -32,25 +41,17 @@ if uploaded_file is not None:
 
   h, w, _ = img.shape
 
-  # 🔍 拡大倍率の選択ボタン（後ろの席対策！）
-  st.markdown("### 🔍 ズーム（拡大）倍率")
-  zoom_level = st.radio(
-      "遠くて文字が見えにくい場合は倍率を選んでください",
-      ["等倍 (1x)", "2倍 (2x)", "4倍 (4x)"],
-      horizontal=True,
-  )
-
-  # 選択された倍率に応じて画像を切り出し（中央をズーム）
-  if "2倍" in zoom_level:
+  # 選択された倍率に応じて撮影画像を即座にトリミング（ズーム）
+  if "2倍" in zoom_mode:
     crop_h, crop_w = int(h / 2), int(w / 2)
     start_h, start_w = int(h / 4), int(w / 4)
     img = img[start_h : start_h + crop_h, start_w : start_w + crop_w]
-  elif "4倍" in zoom_level:
+  elif "4倍" in zoom_mode:
     crop_h, crop_w = int(h / 4), int(w / 4)
     start_h, start_w = int(h * 3 / 8), int(w * 3 / 8)
     img = img[start_h : start_h + crop_h, start_w : start_w + crop_w]
 
-  # 簡易的な輪郭検出によるスクリーン自動切り出しの試み
+  # 簡易的な輪郭検出によるスクリーン自動切り出し
   gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
   blurred = cv2.GaussianBlur(gray, (5, 5), 0)
   edged = cv2.Canny(blurred, 50, 150)
@@ -69,11 +70,11 @@ if uploaded_file is not None:
       break
 
   if screen_contour is not None:
-    st.success("スライドの範囲を検出・ズームしました！")
+    st.success(f"スライドを検出しました（{zoom_mode}）！")
   else:
-    st.info(f"選択された倍率（{zoom_level}）で表示しています。")
+    st.info(f"{zoom_mode} で切り抜きました。")
 
-  st.image(img, channels="BGR", caption=f"プレビュー ({zoom_level})")
+  st.image(img, channels="BGR", caption=f"撮影画像プレビュー ({zoom_mode})")
 
 st.divider()
 
@@ -85,7 +86,6 @@ transcribed_text = st.text_area(
 )
 
 if transcribed_text:
-  # 韓国語（ハングル）の文字コードが含まれているか判定
   if any(
       0xAC00 <= ord(char) <= 0xD7A3 for char in transcribed_text
   ):
