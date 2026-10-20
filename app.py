@@ -20,36 +20,21 @@ with col_l2:
 
 st.divider()
 
-# --- 2. 撮影前ズーム選択 & スクリーン撮影 ---
-st.header("2. スクリーン撮影")
-
-# 📸 撮影「前」に倍率を選択できるようにしました！
-st.markdown("### 🔍 撮影時のズーム倍率を選択")
-zoom_mode = st.radio(
-    "後ろの席からの撮影に合わせて倍率を選んでください",
-    ["等倍 (1x)", "2倍 (2x)", "4倍 (4x)"],
-    horizontal=True,
+# --- 2. ファイル選択による画像アップロード & スクリーン自動切り出し ---
+st.header("2. スライド画像の選択")
+st.info(
+    "💡 スマホの標準カメラでズーム撮影した写真を、アルバムから選択してください。"
 )
 
-uploaded_file = st.camera_input("スクリーンの写真を撮影")
+uploaded_file = st.file_uploader(
+    "スライドの写真を選択 (JPEG / PNG)", type=["jpg", "jpeg", "png"]
+)
 
 if uploaded_file is not None:
-  # 画像をOpenCV形式に変換
+  # アップロードされた画像をOpenCV形式に変換
   bytes_data = uploaded_file.getvalue()
   np_arr = np.frombuffer(bytes_data, np.uint8)
   img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-
-  h, w, _ = img.shape
-
-  # 選択された倍率に応じて撮影画像を即座にトリミング（ズーム）
-  if "2倍" in zoom_mode:
-    crop_h, crop_w = int(h / 2), int(w / 2)
-    start_h, start_w = int(h / 4), int(w / 4)
-    img = img[start_h : start_h + crop_h, start_w : start_w + crop_w]
-  elif "4倍" in zoom_mode:
-    crop_h, crop_w = int(h / 4), int(w / 4)
-    start_h, start_w = int(h * 3 / 8), int(w * 3 / 8)
-    img = img[start_h : start_h + crop_h, start_w : start_w + crop_w]
 
   # 簡易的な輪郭検出によるスクリーン自動切り出し
   gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -70,11 +55,11 @@ if uploaded_file is not None:
       break
 
   if screen_contour is not None:
-    st.success(f"スライドを検出しました（{zoom_mode}）！")
+    st.success("スライドの範囲を自動検出し、切り抜きました！")
   else:
-    st.info(f"{zoom_mode} で切り抜きました。")
+    st.info("選択された画像を表示します。")
 
-  st.image(img, channels="BGR", caption=f"撮影画像プレビュー ({zoom_mode})")
+  st.image(img, channels="BGR", caption="アップロードされたスライド画像")
 
 st.divider()
 
